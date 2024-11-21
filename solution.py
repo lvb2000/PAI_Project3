@@ -3,7 +3,7 @@ import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C, DotProduct
+from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
 
 
 # global variables
@@ -27,8 +27,8 @@ class BOAlgorithm():
         self.y_f = np.empty((0, 1))  # Empty array for the objective function values
         self.y_v = np.empty((0, 1)) 
 
-        self.kernel_f = 1.0 * Matern(nu=2.5) + 1.0 * RBF(length_scale=1.0)
-        self.kernel_v = C(4.0, (1e-3, 1e3)) * (DotProduct() + 1.0 * Matern(nu=2.5))
+        self.kernel_f = Matern(nu=2.5) # RBF(length_scale=1.0)
+        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5)
 
         self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True)
         self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True)
@@ -136,7 +136,7 @@ class BOAlgorithm():
         self.y_f = np.vstack((self.y_f, f))
         self.y_v = np.vstack((self.y_v, v))
 
-        #Refit GPs
+        # Refit GPs
         self.gp_f.fit(self.X, self.y_f)
         self.gp_v.fit(self.X, self.y_v)
 
@@ -217,8 +217,8 @@ def main():
 
     # Add initial safe point
     x_init = get_initial_safe_point()
-    obj_val = f(x_init)
-    cost_val = v(x_init)
+    obj_val = f(x_init)  # bioavailability f maps feature to logP (proxy of bioavailability)
+    cost_val = v(x_init)  # synthetic accessibility (SA)
     agent.add_observation(x_init, obj_val, cost_val)
 
     # Loop until budget is exhausted
