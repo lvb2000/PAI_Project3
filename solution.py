@@ -42,7 +42,7 @@ class BOAlgorithm():
         recommendation: float
             the next point to evaluate
         """
-        recommendation = self.optimize_acquisition_function
+        recommendation = self.optimize_acquisition_function()
 
         return recommendation
 
@@ -149,7 +149,7 @@ class BOAlgorithm():
         solution: float
             the optimal solution of the problem
         """
-        X_samples = np.linspace(self.domain[0], self.domain[1], 1000).reshape(-1, 1)
+        X_samples = np.linspace(0, 10, 1000).reshape(-1, 1)
         mu_f, std = self.gp_f.predict(X_samples, return_std=True)
         mu_v, std = self.gp_v.predict(X_samples, return_std=True)
 
