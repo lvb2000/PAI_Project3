@@ -28,10 +28,10 @@ class BOAlgorithm():
         self.y_v = np.empty((0, 1)) 
 
         self.kernel_f = Matern(nu=2.5) # RBF(length_scale=1.0)
-        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5)
+        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5,length_scale=1.5 , length_scale_bounds=(1e-3, 1e3))
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True)
-        self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True)
+        self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True, n_restarts_optimizer=10)
+        self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True, n_restarts_optimizer=10)
 
     def recommend_next(self):
         """
