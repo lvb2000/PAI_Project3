@@ -1,7 +1,9 @@
 """Solution."""
 import numpy as np
 from scipy.optimize import fmin_l_bfgs_b
-# import additional ...
+from scipy.stats import norm
+from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel as C, DotProduct
 
 
 # global variables
@@ -14,8 +16,22 @@ SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
 class BOAlgorithm():
     def __init__(self):
         """Initializes the algorithm with a parameter configuration."""
-        # TODO: Define all relevant class members for your BO algorithm here.
-        pass
+
+        self.noise_f = 0.15
+        self.noise_v = 0.0001
+        self.domain = DOMAIN
+        self.kappa = SAFETY_THRESHOLD
+
+        # Data storage
+        self.X = np.empty((0, 1))  # Empty array for the input data (X)
+        self.y_f = np.empty((0, 1))  # Empty array for the objective function values
+        self.y_v = np.empty((0, 1)) 
+
+        self.kernel_f = 1.0 * Matern(nu=2.5) + 1.0 * RBF(length_scale=1.0)
+        self.kernel_v = C(4.0, (1e-3, 1e3)) * (DotProduct() + 1.0 * Matern(nu=2.5))
+
+        self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True)
+        self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True)
 
     def recommend_next(self):
         """
@@ -26,12 +42,9 @@ class BOAlgorithm():
         recommendation: float
             the next point to evaluate
         """
-        # TODO: Implement the function which recommends the next point to query
-        # using functions f and v.
-        # In implementing this function, you may use
-        # optimize_acquisition_function() defined below.
+        recommendation = self.optimize_acquisition_function
 
-        raise NotImplementedError
+        return recommendation
 
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
@@ -78,8 +91,26 @@ class BOAlgorithm():
             Value of the acquisition function at x
         """
         x = np.atleast_2d(x)
-        # TODO: Implement the acquisition function you want to optimize.
-        raise NotImplementedError
+
+        # Predict mean and standard deviation for logP (f)
+        mu_f, sigma_f = self.gp_f.predict(x, return_std=True)
+        sigma_f = np.maximum(sigma_f, 1e-9)  # Avoid division by zero
+
+        # Predict mean and standard deviation for SA (v)
+        mu_v, sigma_v = self.gp_v.predict(x, return_std=True)
+
+        # Compute the probability of feasibility: P(v(x) < kappa)
+        p_feasible = norm.cdf(self.kappa, loc=mu_v, scale=sigma_v)
+
+        # Compute Expected Improvement for f(x)
+        y_max = np.max(self.y_f)
+        z = (mu_f - y_max) / sigma_f
+        ei = (mu_f - y_max) * norm.cdf(z) + sigma_f * norm.pdf(z)
+
+        # Weight EI by the feasibility probability
+        af_value = ei.flatten() * p_feasible.flatten()
+
+        return af_value
 
     def add_observation(self, x: float, f: float, v: float):
         """
@@ -94,8 +125,20 @@ class BOAlgorithm():
         v: float
             SA constraint func
         """
-        # TODO: Add the observed data {x, f, v} to your model.
-        raise NotImplementedError
+        x = np.array([[x]]).reshape(1, 1)  # Shape (1, 1)
+        f = np.array([[f]]).reshape(1, 1)  # Shape (1, 1)
+        v = np.array([[v]]).reshape(1, 1)  # Shape (1, 1)
+
+        
+
+        # Add new observation to the dataset
+        self.X = np.vstack((self.X, x))
+        self.y_f = np.vstack((self.y_f, f))
+        self.y_v = np.vstack((self.y_v, v))
+
+        #Refit GPs
+        self.gp_f.fit(self.X, self.y_f)
+        self.gp_v.fit(self.X, self.y_v)
 
     def get_optimal_solution(self):
         """
@@ -106,8 +149,22 @@ class BOAlgorithm():
         solution: float
             the optimal solution of the problem
         """
-        # TODO: Return your predicted safe optimum of f.
-        raise NotImplementedError
+        X_samples = np.linspace(self.domain[0], self.domain[1], 1000).reshape(-1, 1)
+        mu_f, std = self.gp_f.predict(X_samples, return_std=True)
+        mu_v, std = self.gp_v.predict(X_samples, return_std=True)
+
+        # Filter out points where v(x) >= kappa
+        feasible_indices = np.where(mu_v.flatten() < self.kappa)[0]
+
+        if len(feasible_indices) == 0:
+            raise ValueError("No feasible solution found within the constraint!")
+
+        # Find the point with the maximum predicted f(x) among feasible points
+        feasible_mu_f = mu_f[feasible_indices]
+        feasible_X = X_samples[feasible_indices]
+
+        x_opt = feasible_X[np.argmax(feasible_mu_f)].item()
+        return x_opt
 
     def plot(self, plot_recommendation: bool = True):
         """Plot objective and constraint posterior for debugging (OPTIONAL).
