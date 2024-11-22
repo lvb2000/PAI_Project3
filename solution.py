@@ -4,6 +4,7 @@ from scipy.optimize import fmin_l_bfgs_b
 from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
+from matplotlib import pyplot as plt
 
 
 # global variables
@@ -27,8 +28,8 @@ class BOAlgorithm():
         self.y_f = np.empty((0, 1))  # Empty array for the objective function values
         self.y_v = np.empty((0, 1)) 
 
-        self.kernel_f = Matern(nu=2.5) # RBF(length_scale=1.0)
-        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5,length_scale=1.5 , length_scale_bounds=(1e-3, 1e3))
+        self.kernel_f = Matern(nu=2.5, length_scale=1) # RBF(length_scale=1.0)
+        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5 ,length_scale=1, length_scale_bounds=(1e-3, 1e3))
 
         self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True, n_restarts_optimizer=10)
         self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True, n_restarts_optimizer=10)
@@ -140,6 +141,10 @@ class BOAlgorithm():
         self.gp_f.fit(self.X, self.y_f)
         self.gp_v.fit(self.X, self.y_v)
 
+        self.plot()
+
+
+
     def get_optimal_solution(self):
         """
         Return x_opt that is believed to be the maximizer of f.
@@ -174,7 +179,45 @@ class BOAlgorithm():
         plot_recommendation: bool
             Plots the recommended point if True.
         """
-        pass
+        X_samples = np.linspace(0, 11, 1000).reshape(-1, 1)
+        mu_f, std_f = self.gp_f.predict(X_samples, return_std=True)
+        mu_v, std_v = self.gp_v.predict(X_samples, return_std=True)
+
+        # Create figure and axis objects
+        fig, ax1 = plt.subplots()
+
+        X_samples = X_samples.flatten()
+
+        # First curve on the left axis
+        ax1.plot(X_samples, mu_f, label='Bioavailability Curve', color='blue')
+        ax1.fill_between(X_samples, mu_f - std_f, mu_f + std_f, color='blue', alpha=0.2)
+        ax1.set_xlabel('X-axis')
+        ax1.tick_params(axis='y', labelcolor='blue')
+
+        # Second curve on the right axis
+        ax2 = ax1.twinx()  # Create a twin axis sharing the same x-axis
+        ax2.plot(X_samples, mu_v, label='Synthetic Accessibility Curve', color='red')
+        ax2.fill_between(X_samples, mu_v - std_v, mu_v + std_v, color='red', alpha=0.2)
+        ax2.tick_params(axis='y', labelcolor='red')
+
+        # fix axis intervals
+        ax1.set_xlim(0, 11)
+        ax1.set_ylim(-5, 1)
+        ax2.set_ylim( 1, 4)
+
+        # get the last new point
+        new_point = self.X[-1]
+        ax1.scatter(new_point, self.y_f[-1], color='green', label='New Point')
+
+        # all points except the last one
+        ax1.scatter(self.X[:-1], self.y_f[:-1], color='black', label='Old Points')
+
+        # Title and layout adjustments
+        plt.title('Posterior Predictions')
+        fig.tight_layout()
+
+        # Show plot
+        plt.show()
 
 
 # ---
