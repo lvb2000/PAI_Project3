@@ -5,6 +5,7 @@ from scipy.stats import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import Matern, RBF, ConstantKernel
 from matplotlib import pyplot as plt
+import os
 
 
 # global variables
@@ -22,17 +23,35 @@ class BOAlgorithm():
         self.noise_v = 0.0001
         self.domain = DOMAIN
         self.kappa = SAFETY_THRESHOLD
+        self.lagrangian = 1
 
         # Data storage
         self.X = np.empty((0, 1))  # Empty array for the input data (X)
         self.y_f = np.empty((0, 1))  # Empty array for the objective function values
         self.y_v = np.empty((0, 1)) 
 
-        self.kernel_f = Matern(nu=2.5, length_scale=1) # RBF(length_scale=1.0)
-        self.kernel_v = ConstantKernel(4.0, (1e-3, 1e3)) + Matern(nu=2.5 ,length_scale=1, length_scale_bounds=(1e-3, 1e3))
+        self.kernel_f = Matern(nu=2.5) # RBF(length_scale=1.0)
+        self.kernel_v = ConstantKernel(4.0, (1e-1,1e2)) + Matern(nu=2.5 ,length_scale=1, length_scale_bounds=(1e-3, 1e3))
 
         self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True, n_restarts_optimizer=10)
         self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True, n_restarts_optimizer=10)
+
+        # open a new directory for the plots at local machine
+        if not os.path.exists("plots"):
+            os.makedirs("plots")
+        # Start with the base directory
+        self.directory = "plots_1"
+        counter = 1
+        # Check if directory exists and increment the name if necessary
+        while os.path.exists(f"plots/{self.directory}"):
+            counter += 1
+            self.directory = f"plots_{counter}"
+
+        # Create the directory
+        os.makedirs("plots/"+self.directory)
+        print(f"Directory created: {self.directory}")
+        self.plot_counter = 1
+
 
     def recommend_next(self):
         """
@@ -43,9 +62,8 @@ class BOAlgorithm():
         recommendation: float
             the next point to evaluate
         """
-        recommendation = self.optimize_acquisition_function()
 
-        return recommendation
+        return float(self.optimize_acquisition_function())
 
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
@@ -95,13 +113,14 @@ class BOAlgorithm():
 
         # Predict mean and standard deviation for logP (f)
         mu_f, sigma_f = self.gp_f.predict(x, return_std=True)
+        # This gives the point of maximum uncertainty
         sigma_f = np.maximum(sigma_f, 1e-9)  # Avoid division by zero
 
         # Predict mean and standard deviation for SA (v)
         mu_v, sigma_v = self.gp_v.predict(x, return_std=True)
 
-        # Compute the probability of feasibility: P(v(x) < kappa)
-        p_feasible = norm.cdf(self.kappa, loc=mu_v, scale=sigma_v)
+        # Compute the worst case probability of feasibility: P(v(x) < kappa)
+        relaxation = self.lagrangian * max(0, mu_v)
 
         # Compute Expected Improvement for f(x)
         y_max = np.max(self.y_f)
@@ -109,7 +128,7 @@ class BOAlgorithm():
         ei = (mu_f - y_max) * norm.cdf(z) + sigma_f * norm.pdf(z)
 
         # Weight EI by the feasibility probability
-        af_value = ei.flatten() * p_feasible.flatten()
+        af_value = ei.flatten() - relaxation
 
         return af_value
 
@@ -201,9 +220,9 @@ class BOAlgorithm():
         ax2.tick_params(axis='y', labelcolor='red')
 
         # fix axis intervals
-        ax1.set_xlim(0, 11)
-        ax1.set_ylim(-5, 1)
-        ax2.set_ylim( 1, 4)
+        #ax1.set_xlim(0, 11)
+        #ax1.set_ylim(-5, 1)
+        #ax2.set_ylim( 1, 4)
 
         # get the last new point
         new_point = self.X[-1]
@@ -215,9 +234,14 @@ class BOAlgorithm():
         # Title and layout adjustments
         plt.title('Posterior Predictions')
         fig.tight_layout()
-
-        # Show plot
-        plt.show()
+        # plot
+        #plt.show()
+        # wait
+        #plt.pause(0.3)
+        # Save plot with increasing counter
+        plt.savefig(f"plots/{self.directory}/plot_{self.plot_counter}.png")
+        self.plot_counter += 1
+        plt.close()
 
 
 # ---
@@ -238,6 +262,7 @@ def f(x: float):
 
 def v(x: float):
     """Dummy SA"""
+    # add infeasible region
     return 2.0
 
 
@@ -269,14 +294,9 @@ def main():
         # Get next recommendation
         x = agent.recommend_next()
 
-        # Check for valid shape
-        assert x.shape == (1, DOMAIN.shape[0]), \
-            f"The function recommend_next must return a numpy array of " \
-            f"shape (1, {DOMAIN.shape[0]})"
-
         # Obtain objective and constraint observation
-        obj_val = f(x) + np.randn()
-        cost_val = v(x) + np.randn()
+        obj_val = f(x) + np.random.rand()
+        cost_val = v(x) + np.random.rand()
         agent.add_observation(x, obj_val, cost_val)
 
     # Validate solution
