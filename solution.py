@@ -23,17 +23,20 @@ class BOAlgorithm():
         self.noise_v = 0.0001
         self.domain = DOMAIN
         self.kappa = SAFETY_THRESHOLD
-        self.lagrangian = 1
+        self.lagrangian = 2
+
+        #----- SAFE-OPT -----#
+        self.beta = 1  # 95% confidence interval
 
         # Data storage
         self.X = np.empty((0, 1))  # Empty array for the input data (X)
         self.y_f = np.empty((0, 1))  # Empty array for the objective function values
-        self.y_v = np.empty((0, 1)) 
+        self.y_v = np.empty((0, 1))
 
-        self.kernel_f = Matern(nu=2.5) # RBF(length_scale=1.0)
-        self.kernel_v = ConstantKernel(4.0, (1e-1,1e2)) + Matern(nu=2.5 ,length_scale=1, length_scale_bounds=(1e-3, 1e3))
+        self.kernel_f = ConstantKernel(1.0, (1e-1, 1e2)) + 1.0 * Matern(nu=2.5, length_scale=1.5, length_scale_bounds=(1e-1, 1e2))
+        self.kernel_v = ConstantKernel(1.0, (1e-1, 1e2)) + 1.0 * Matern(nu=2.5 ,length_scale=1.5, length_scale_bounds=(1e-1, 1e2))+RBF(length_scale=1.5,length_scale_bounds=(1e-1, 1e2))
 
-        self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f**2, normalize_y=True, n_restarts_optimizer=10)
+        self.gp_f = GaussianProcessRegressor(kernel=self.kernel_f, alpha=self.noise_f **2, normalize_y=True, n_restarts_optimizer=10)
         self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True, n_restarts_optimizer=10)
 
         # open a new directory for the plots at local machine
@@ -52,6 +55,18 @@ class BOAlgorithm():
         print(f"Directory created: {self.directory}")
         self.plot_counter = 1
 
+    def get_max_lower_bound(self):
+        """Compute the maximum lower bound of the acquisition function."""
+        X_samples = np.linspace(0, 10, 1000).reshape(-1, 1)
+        mu_f, std_f = self.gp_f.predict(X_samples, return_std=True)
+        mu_v, std_v = self.gp_v.predict(X_samples, return_std=True)
+        # remove samples which can be below the threshold
+        l_v = mu_v - (self.beta * std_f)
+        safe_indices = np.argwhere(l_v <= self.kappa).flatten()
+        mu_f_save = mu_f[safe_indices]
+        std_f_save = std_f[safe_indices]
+        l_save = mu_f_save - (self.beta * std_f_save)
+        return np.max(l_save)
 
     def recommend_next(self):
         """
@@ -62,7 +77,8 @@ class BOAlgorithm():
         recommendation: float
             the next point to evaluate
         """
-
+        # Update confidence intervals
+        self.max_lower_bound = self.get_max_lower_bound()
         return float(self.optimize_acquisition_function())
 
     def optimize_acquisition_function(self):
@@ -90,11 +106,11 @@ class BOAlgorithm():
             x_values.append(np.clip(result[0], *DOMAIN[0]))
             f_values.append(-result[1])
 
+        self.plot_algorithm(x_values, f_values)
         ind = np.argmax(f_values)
         x_opt = x_values[ind].item()
 
         return x_opt
-
     def acquisition_function(self, x: np.ndarray):
         """Compute the acquisition function for x.
 
@@ -110,25 +126,29 @@ class BOAlgorithm():
             Value of the acquisition function at x
         """
         x = np.atleast_2d(x)
+        af_value = np.zeros(x.shape[0])
 
-        # Predict mean and standard deviation for logP (f)
-        mu_f, sigma_f = self.gp_f.predict(x, return_std=True)
-        # This gives the point of maximum uncertainty
-        sigma_f = np.maximum(sigma_f, 1e-9)  # Avoid division by zero
+        mean_f, std_f = self.gp_f.predict(x, return_std=True)
+        mean_v, std_v = self.gp_v.predict(x, return_std=True)
 
-        # Predict mean and standard deviation for SA (v)
-        mu_v, sigma_v = self.gp_v.predict(x, return_std=True)
+        # Check if x is within set G
+        u_v = mean_v + self.beta * std_f
+        l_v = mean_v - self.beta * std_f
 
-        # Compute the worst case probability of feasibility: P(v(x) < kappa)
-        relaxation = self.lagrangian * max(0, mu_v)
+        # Compute u and l
+        u = mean_f + self.beta * std_f
+        l = mean_f - self.beta * std_f
 
-        # Compute Expected Improvement for f(x)
-        y_max = np.max(self.y_f)
-        z = (mu_f - y_max) / sigma_f
-        ei = (mu_f - y_max) * norm.cdf(z) + sigma_f * norm.pdf(z)
+        af_value = u - l
 
-        # Weight EI by the feasibility probability
-        af_value = ei.flatten() - relaxation
+        # distance to points
+        average_distance = 0.1 * np.mean(np.abs(x - self.X))
+
+        # for all u_v >= self.kappa set -100 and for all u <= self.max_lower_bound set -1000
+        af_value[u_v >= self.kappa] = ((u_v - self.kappa)  * (-10)) - average_distance
+        af_value[u <= self.max_lower_bound] = (-1) * (self.max_lower_bound - u)
+
+        af_value -= self.lagrangian * max(0, u_v)
 
         return af_value
 
@@ -173,22 +193,9 @@ class BOAlgorithm():
         solution: float
             the optimal solution of the problem
         """
-        X_samples = np.linspace(0, 10, 1000).reshape(-1, 1)
-        mu_f, std = self.gp_f.predict(X_samples, return_std=True)
-        mu_v, std = self.gp_v.predict(X_samples, return_std=True)
-
-        # Filter out points where v(x) >= kappa
-        feasible_indices = np.where(mu_v.flatten() < self.kappa)[0]
-
-        if len(feasible_indices) == 0:
-            raise ValueError("No feasible solution found within the constraint!")
-
-        # Find the point with the maximum predicted f(x) among feasible points
-        feasible_mu_f = mu_f[feasible_indices]
-        feasible_X = X_samples[feasible_indices]
-
-        x_opt = feasible_X[np.argmax(feasible_mu_f)].item()
-        return x_opt
+        safe_indices = np.argwhere(np.array(self.y_v) < SAFETY_THRESHOLD).flatten()
+        safe_X = np.array(self.X)[safe_indices]
+        return safe_X[np.argmax(np.array(self.y_f)[safe_indices])].item()
 
     def plot(self, plot_recommendation: bool = True):
         """Plot objective and constraint posterior for debugging (OPTIONAL).
@@ -198,7 +205,7 @@ class BOAlgorithm():
         plot_recommendation: bool
             Plots the recommended point if True.
         """
-        X_samples = np.linspace(0, 11, 1000).reshape(-1, 1)
+        X_samples = np.linspace(0, 11, 10000).reshape(-1, 1)
         mu_f, std_f = self.gp_f.predict(X_samples, return_std=True)
         mu_v, std_v = self.gp_v.predict(X_samples, return_std=True)
 
@@ -243,6 +250,13 @@ class BOAlgorithm():
         self.plot_counter += 1
         plt.close()
 
+    def plot_algorithm(self,x,y):
+        """Plot the algorithm progress."""
+        # Create figure and axis objects
+        fig, ax1 = plt.subplots()
+        ax1.scatter(x, y, color='green', label='New Point')
+        plt.savefig(f"plots/{self.directory}/plot_alg_{self.plot_counter}.png")
+        plt.close()
 
 # ---
 # TOY PROBLEM. To check your code works as expected (ignored by checker).
@@ -262,8 +276,11 @@ def f(x: float):
 
 def v(x: float):
     """Dummy SA"""
-    # add infeasible region
-    return 2.0
+    # add smooth increase at 5
+    res = 2
+    if x > 5:
+        res += 0.5 * (x - 5)**2
+    return res
 
 
 def get_initial_safe_point():
