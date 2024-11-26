@@ -40,20 +40,20 @@ class BOAlgorithm():
         self.gp_v = GaussianProcessRegressor(kernel=self.kernel_v, alpha=self.noise_v**2, normalize_y=True, n_restarts_optimizer=10)
 
         # open a new directory for the plots at local machine
-        if not os.path.exists("plots"):
-            os.makedirs("plots")
+        #if not os.path.exists("plots"):
+        #    os.makedirs("plots")
         # Start with the base directory
-        self.directory = "plots_1"
-        counter = 1
+        #self.directory = "plots_1"
+        #counter = 1
         # Check if directory exists and increment the name if necessary
-        while os.path.exists(f"plots/{self.directory}"):
-            counter += 1
-            self.directory = f"plots_{counter}"
+        #while os.path.exists(f"plots/{self.directory}"):
+        #    counter += 1
+        #    self.directory = f"plots_{counter}"
 
         # Create the directory
-        os.makedirs("plots/"+self.directory)
-        print(f"Directory created: {self.directory}")
-        self.plot_counter = 1
+        #os.makedirs("plots/"+self.directory)
+        #print(f"Directory created: {self.directory}")
+        #self.plot_counter = 1
 
     def get_max_lower_bound(self):
         """Compute the maximum lower bound of the acquisition function."""
@@ -106,7 +106,7 @@ class BOAlgorithm():
             x_values.append(np.clip(result[0], *DOMAIN[0]))
             f_values.append(-result[1])
 
-        self.plot_algorithm(x_values, f_values)
+        #self.plot_algorithm(x_values, f_values)
         ind = np.argmax(f_values)
         x_opt = x_values[ind].item()
 
@@ -126,6 +126,7 @@ class BOAlgorithm():
             Value of the acquisition function at x
         """
         x = np.atleast_2d(x)
+        # Safe Opt algorithm adapted
         af_value = np.zeros(x.shape[0])
 
         mean_f, std_f = self.gp_f.predict(x, return_std=True)
@@ -139,16 +140,25 @@ class BOAlgorithm():
         u = mean_f + self.beta * std_f
         l = mean_f - self.beta * std_f
 
+        # Compute difference between upper and lower function
         af_value = u - l
 
         # distance to points
-        average_distance = 0.1 * np.mean(np.abs(x - self.X))
+        average_distance = np.mean(np.abs(x - self.X))
 
         # for all u_v >= self.kappa set -100 and for all u <= self.max_lower_bound set -1000
-        af_value[u_v >= self.kappa] = ((u_v - self.kappa)  * (-10)) - average_distance
-        af_value[u <= self.max_lower_bound] = (-1) * (self.max_lower_bound - u)
+        # G matrix from paper
+        idx1 = np.argwhere(u_v >= self.kappa).flatten()
+        if len(idx1) > 0:
+            af_value[idx1] = ((u_v - self.kappa)  * (-10))
+        # idx2 where u <= self.max_lower_bound and idx1 is not in idx2
+        # M matrix from paper
+        idx2 = np.argwhere(u <= self.max_lower_bound).flatten()
+        idx2 = np.setdiff1d(idx2, idx1)
+        if len(idx2) > 0:
+            af_value[idx2] = (-1) * (self.max_lower_bound - u)
 
-        af_value -= self.lagrangian * max(0, u_v)
+        af_value -= (self.lagrangian * max(0, u_v) + average_distance)
 
         return af_value
 
@@ -180,7 +190,7 @@ class BOAlgorithm():
         self.gp_f.fit(self.X, self.y_f)
         self.gp_v.fit(self.X, self.y_v)
 
-        self.plot()
+        #self.plot()
 
 
 
@@ -193,6 +203,7 @@ class BOAlgorithm():
         solution: float
             the optimal solution of the problem
         """
+        # Optimal solution is the point with the highest bioavailability out of all sampled points
         safe_indices = np.argwhere(np.array(self.y_v) < SAFETY_THRESHOLD).flatten()
         safe_X = np.array(self.X)[safe_indices]
         return safe_X[np.argmax(np.array(self.y_f)[safe_indices])].item()
