@@ -59,7 +59,7 @@ Both \( f(x) \) and \( v(x) \) are accessible only through **noisy evaluations**
 ## Results
 - **Optimal Solution:** Score of \( 0.835 \) achieved with \( v(x) < \kappa \) for nearly all inference points.
 - **Algorithm:** SAFE-OPT from [Safe Exploration for Optimization with Gaussian Processes](https://las.inf.ethz.ch/files/sui15icml-long.pdf)
-- **Plotting** Precise parameter tuning by analysing gaussian process and acquisition functions with increasing amount of data points.
+- **Plotting:** Precise parameter tuning by analysing gaussian process and acquisition functions with increasing amount of data points.
 
 ![Image](plot_gp.png "GP Plot")
 
